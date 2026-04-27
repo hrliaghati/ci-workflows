@@ -103,10 +103,16 @@ jobs:
         run: mypy ${{ inputs.mypy-path }}
 
   # -------- Rust: fmt / clippy / test / coverage ----------------------
+  # PyO3 extension crates need Python dev headers for linking, so we
+  # set up Python here too. The Python version is fixed (3.12) since
+  # this job tests Rust logic, not Python compatibility.
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy, llvm-tools-preview
