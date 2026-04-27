@@ -256,16 +256,23 @@ jobs:
         with:
           name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
           path: dist
-      - name: Install wheel + test deps
+      - name: Install wheel + test deps into a fresh venv
         shell: bash
+        # Build a venv pinned to the matrix Python and install the wheel
+        # directly. We invoke pytest via the venv's python binary because
+        # `uv run` can pick the wrong interpreter when there's no
+        # pyproject.toml at the repo root (workspace projects).
         run: |
-          uv venv --python ${{ matrix.py }}
-          uv pip install "$(ls dist/*.whl | head -n1)"
-          uv pip install pytest pytest-cov
+          uv venv .venv --python ${{ matrix.py }}
+          if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install "$(ls dist/*.whl | head -n1)"
+          "$PY" -m pip install pytest pytest-cov
       - name: Run short tests
         shell: bash
         run: |
-          uv run pytest -m "not slow" \
+          "$PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
             --cov-report=term-missing \
             --cov-report=xml \
@@ -329,18 +336,21 @@ jobs:
       - name: Install wheel + test deps
         shell: bash
         run: |
-          uv venv --python ${{ inputs.macos-short-test-version }}
+          uv venv .venv --python ${{ inputs.macos-short-test-version }}
+          PY=.venv/bin/python
+          echo "PY=$PY" >> "$GITHUB_ENV"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             wheel=$(ls "${{ inputs.manifest-dir }}/dist/"*.whl | head -n1)
           else
             wheel=$(ls dist/*.whl | head -n1)
           fi
-          uv pip install "$wheel"
-          uv pip install pytest pytest-cov
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install "$wheel"
+          "$PY" -m pip install pytest pytest-cov
       - name: Run short tests
         shell: bash
         run: |
-          uv run pytest -m "not slow" \
+          "$PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
             --cov-report=term-missing \
             --cov-fail-under=${{ inputs.cov-fail-under }}
@@ -370,9 +380,12 @@ jobs:
       - name: Install wheel + test deps
         shell: bash
         run: |
-          uv venv --python ${{ matrix.py }}
-          uv pip install "$(ls dist/*.whl | head -n1)"
-          uv pip install pytest pytest-cov
+          uv venv .venv --python ${{ matrix.py }}
+          if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install "$(ls dist/*.whl | head -n1)"
+          "$PY" -m pip install pytest pytest-cov
       - name: Run slow tests
         shell: bash
         # No --cov-fail-under here: slow tests alone don't represent total
@@ -381,7 +394,7 @@ jobs:
         # that haven't marked any tests slow yet don't red-light.
         run: |
           set +e
-          uv run pytest -m slow \
+          "$PY" -m pytest -m slow \
             --cov=${{ inputs.package-path }} \
             --cov-append \
             --cov-report=term-missing \
