@@ -70,6 +70,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install 3.12
       - name: uv sync (with extras if present)
         run: uv sync --all-extras || uv sync
@@ -100,6 +101,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install 3.12
       - name: Read version
         id: version
@@ -150,6 +152,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
         shell: bash
@@ -192,6 +195,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ inputs.macos-short-test-version }}
       - name: uv sync
         run: |
@@ -220,6 +224,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
         shell: bash

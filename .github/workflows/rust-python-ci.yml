@@ -90,6 +90,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install 3.12
       - name: Install ruff (and mypy if requested)
         run: |
@@ -237,6 +238,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: Download wheel
         uses: actions/download-artifact@v4
@@ -288,6 +290,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ inputs.macos-short-test-version }}
 
       - uses: actions/setup-python@v5
@@ -347,6 +350,7 @@ jobs:
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
+          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - uses: actions/download-artifact@v4
         with:
