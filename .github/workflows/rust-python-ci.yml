@@ -133,7 +133,7 @@ jobs:
         run: |
           cargo llvm-cov --workspace --lcov --output-path lcov.info \
             --fail-under-lines ${{ inputs.cargo-fail-under-lines }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rust-lcov
           path: lcov.info
@@ -175,7 +175,7 @@ jobs:
           # Pin it next to the maturin pyproject so the upload path is stable.
           args: --release --interpreter ${{ matrix.py }} --out dist
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ matrix.py }}
           path: ${{ inputs.manifest-dir }}/dist/*.whl
@@ -204,7 +204,7 @@ jobs:
           working-directory: ${{ inputs.manifest-dir }}
           command: build
           args: --release --interpreter ${{ matrix.py }} --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ inputs.package-name }}-macos-latest-${{ matrix.py }}
           path: ${{ inputs.manifest-dir }}/dist/*.whl
@@ -294,14 +294,14 @@ jobs:
           mv htmlcov "$GITHUB_WORKSPACE/" 2>/dev/null || true
       - name: Upload htmlcov (Linux 3.12 only)
         if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-html-short
           path: htmlcov
           retention-days: 14
       - name: Upload coverage artifact for sticky comment
         if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml-short
           path: |
