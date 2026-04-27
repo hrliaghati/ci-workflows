@@ -241,7 +241,7 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: Download wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
           path: dist
@@ -310,7 +310,7 @@ jobs:
       # On main pushes we download from build-macos.
       - name: Download macOS wheel (main push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel-${{ inputs.package-name }}-macos-latest-${{ inputs.abi3 && '3.12' || inputs.macos-short-test-version }}
           path: dist
@@ -352,7 +352,7 @@ jobs:
           version: ${{ inputs.uv-version }}
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
           path: dist
@@ -380,7 +380,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-xml-short
           path: .
