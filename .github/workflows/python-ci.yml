@@ -54,7 +54,7 @@ on:
         default: '^(\.github/|docs/|.*\.md$|\.gitignore$|LICENSE$|\.pre-commit-config\.yaml$)'
       uv-version:
         type: string
-        default: ''
+        default: 'latest'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
