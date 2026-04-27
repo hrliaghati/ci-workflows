@@ -256,7 +256,7 @@ jobs:
         run: |
           uv run pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
-            --cov-report=term \
+            --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
             --cov-fail-under=${{ inputs.cov-fail-under }} \
@@ -331,7 +331,7 @@ jobs:
         run: |
           uv run pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
-            --cov-report=term \
+            --cov-report=term-missing \
             --cov-fail-under=${{ inputs.cov-fail-under }}
 
   # -------- Slow tests ------------------------------------------------
@@ -370,7 +370,7 @@ jobs:
           uv run pytest -m slow \
             --cov=${{ inputs.package-path }} \
             --cov-append \
-            --cov-report=term \
+            --cov-report=term-missing \
             --cov-report=xml
 
   # -------- Coverage sticky PR comment --------------------------------
