@@ -235,13 +235,21 @@ jobs:
         shell: bash
         # No --cov-fail-under here: slow tests alone don't represent total
         # coverage, and the threshold is enforced on the short-test job.
-        # --cov-append is for completeness when artifacts are combined later.
+        # Exit code 5 ("no tests collected") is treated as success so repos
+        # that haven't marked any tests slow yet don't red-light.
         run: |
+          set +e
           uv run --python ${{ matrix.py }} pytest -m slow \
             --cov=${{ inputs.package-path }} \
             --cov-append \
             --cov-report=term-missing \
             --cov-report=xml
+          rc=$?
+          if [ "$rc" = "5" ]; then
+            echo "(no slow tests yet — OK)"
+            exit 0
+          fi
+          exit $rc
 
   # -------- Coverage sticky PR comment --------------------------------
   # Self-contained: parse the TOTAL line from the pytest term-missing
