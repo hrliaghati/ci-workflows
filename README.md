@@ -249,3 +249,10 @@ Plus:
 ## Migration
 
 See [`docs/migration-guide.md`](docs/migration-guide.md).
+
+## Lessons learned (read before debugging)
+
+If you hit `startup_failure`, a setup-uv error, a missing coverage
+comment, or any other CI gotcha — read
+[`docs/lessons-learned.md`](docs/lessons-learned.md) first. We've
+pre-paid the debug loops on the most common issues.
