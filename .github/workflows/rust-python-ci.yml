@@ -270,9 +270,8 @@ jobs:
           uv venv .venv --python ${{ matrix.py }}
           if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
           echo "PY=$PY" >> "$GITHUB_ENV"
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install "$(ls dist/*.whl | head -n1)"
-          "$PY" -m pip install pytest pytest-cov
+          uv pip install --python "$PY" "$(ls dist/*.whl | head -n1)"
+          uv pip install --python "$PY" pytest pytest-cov
       - name: Run short tests
         shell: bash
         run: |
@@ -348,9 +347,8 @@ jobs:
           else
             wheel=$(ls dist/*.whl | head -n1)
           fi
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install "$wheel"
-          "$PY" -m pip install pytest pytest-cov
+          uv pip install --python "$PY" "$wheel"
+          uv pip install --python "$PY" pytest pytest-cov
       - name: Run short tests
         shell: bash
         run: |
@@ -387,9 +385,8 @@ jobs:
           uv venv .venv --python ${{ matrix.py }}
           if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
           echo "PY=$PY" >> "$GITHUB_ENV"
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install "$(ls dist/*.whl | head -n1)"
-          "$PY" -m pip install pytest pytest-cov
+          uv pip install --python "$PY" "$(ls dist/*.whl | head -n1)"
+          uv pip install --python "$PY" pytest pytest-cov
       - name: Run slow tests
         shell: bash
         # No --cov-fail-under here: slow tests alone don't represent total
