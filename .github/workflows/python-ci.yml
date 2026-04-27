@@ -244,6 +244,9 @@ jobs:
             --cov-report=xml
 
   # -------- Coverage sticky PR comment --------------------------------
+  # Self-contained: parse the TOTAL line from the pytest term-missing
+  # output we captured to pytest-coverage.txt and post via marocchino
+  # sticky-pull-request-comment.
   coverage-comment:
     needs: test-short-linux-windows
     if: github.event_name == 'pull_request'
@@ -255,9 +258,32 @@ jobs:
         with:
           name: coverage-xml-short
           path: .
-      - uses: MishaKav/pytest-coverage-comment@v1.1.52
+      - id: parse
+        run: |
+          if [ -f pytest-coverage.txt ]; then
+            total=$(grep -E '^TOTAL' pytest-coverage.txt | awk '{print $NF}' || echo "n/a")
+            tail=$(awk '/^Name +Stmts/,/^TOTAL/' pytest-coverage.txt | head -200)
+          else
+            total="n/a"
+            tail="(no coverage report found)"
+          fi
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          {
+            echo 'report<<COVEOF'
+            echo "$tail"
+            echo 'COVEOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: marocchino/sticky-pull-request-comment@v2
         with:
-          pytest-coverage-path: pytest-coverage.txt
-          junitxml-path: ''
-          report-only-changed-files: false
-          unique-id-for-comment: pytest-coverage
+          header: pytest-coverage
+          message: |
+            ### Pytest coverage — total **${{ steps.parse.outputs.total }}**
+            <details><summary>Coverage table (Linux 3.12 short tests)</summary>
+
+            ```
+            ${{ steps.parse.outputs.report }}
+            ```
+            </details>
+
+            HTML report: download `coverage-html-short` artifact from this run.
+            Threshold (`--cov-fail-under`): ${{ inputs.cov-fail-under }}%.
