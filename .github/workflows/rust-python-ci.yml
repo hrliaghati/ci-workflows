@@ -92,10 +92,12 @@ jobs:
           version: ${{ inputs.uv-version }}
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install 3.12
-      - name: Install ruff (and mypy if requested)
+      - name: Install ruff (and mypy if requested) via uv tool
+        # uv pip install --system fails on PEP 668 systems (Debian).
+        # uv tool install creates an isolated managed venv and PATH entry.
         run: |
-          uv pip install --system ruff
-          if [ -n "${{ inputs.mypy-path }}" ]; then uv pip install --system mypy; fi
+          uv tool install ruff
+          if [ -n "${{ inputs.mypy-path }}" ]; then uv tool install mypy; fi
       - run: ruff check ${{ inputs.manifest-dir }}
       - run: ruff format --check ${{ inputs.manifest-dir }}
       - name: mypy
@@ -164,12 +166,15 @@ jobs:
         with:
           working-directory: ${{ inputs.manifest-dir }}
           command: build
-          args: --release --interpreter ${{ matrix.py }}
+          # --out is relative to working-directory; in Cargo workspaces the
+          # default 'target/wheels' lives at workspace root, not the crate.
+          # Pin it next to the maturin pyproject so the upload path is stable.
+          args: --release --interpreter ${{ matrix.py }} --out dist
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ matrix.py }}
-          path: ${{ inputs.manifest-dir }}/target/wheels/*.whl
+          path: ${{ inputs.manifest-dir }}/dist/*.whl
           if-no-files-found: error
           retention-days: 14
 
@@ -194,11 +199,11 @@ jobs:
         with:
           working-directory: ${{ inputs.manifest-dir }}
           command: build
-          args: --release --interpreter ${{ matrix.py }}
+          args: --release --interpreter ${{ matrix.py }} --out dist
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ inputs.package-name }}-macos-latest-${{ matrix.py }}
-          path: ${{ inputs.manifest-dir }}/target/wheels/*.whl
+          path: ${{ inputs.manifest-dir }}/dist/*.whl
           if-no-files-found: error
           retention-days: 14
 
@@ -311,7 +316,7 @@ jobs:
         with:
           working-directory: ${{ inputs.manifest-dir }}
           command: build
-          args: --release --interpreter ${{ inputs.macos-short-test-version }}
+          args: --release --interpreter ${{ inputs.macos-short-test-version }} --out dist
 
       # On main pushes we download from build-macos.
       - name: Download macOS wheel (main push)
@@ -326,7 +331,7 @@ jobs:
         run: |
           uv venv --python ${{ inputs.macos-short-test-version }}
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            wheel=$(ls "${{ inputs.manifest-dir }}/target/wheels/"*.whl | head -n1)
+            wheel=$(ls "${{ inputs.manifest-dir }}/dist/"*.whl | head -n1)
           else
             wheel=$(ls dist/*.whl | head -n1)
           fi
