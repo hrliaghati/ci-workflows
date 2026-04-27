@@ -39,6 +39,14 @@ on:
 
 jobs:
   ci:
+    # Required: caller must grant the permissions the called workflow needs.
+    # If you skip this, the run will fail with `startup_failure` because the
+    # caller's default token (read-only on most repos) can't grant
+    # pull-requests:write to the sticky-comment jobs.
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
     uses: hrliaghati/ci-workflows/.github/workflows/python-ci.yml@main
     secrets: inherit
     with:
@@ -53,6 +61,10 @@ jobs:
 ```yaml
 jobs:
   ci:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
     uses: hrliaghati/ci-workflows/.github/workflows/rust-python-ci.yml@main
     secrets: inherit
     with:
@@ -69,6 +81,10 @@ jobs:
 ```yaml
 jobs:
   ci:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
     uses: hrliaghati/ci-workflows/.github/workflows/rust-python-ci.yml@main
     secrets: inherit
     with:
@@ -85,6 +101,10 @@ jobs:
 ```yaml
 jobs:
   ci:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
     uses: hrliaghati/ci-workflows/.github/workflows/python-ci.yml@main
     secrets: inherit
     with:
@@ -141,13 +161,17 @@ developer and silently break for everyone else and CI.
 
 Reusable workflows in a **public** repo can be called from any private
 repo of the same owner with no extra setup. This repo is intentionally
-public, so the only thing each consumer needs to confirm is:
+public.
 
-`Settings → Actions → General → Workflow permissions`:
-- ✅ "Read and write permissions" (so the sticky-comment actions can
-  post to PRs).
-- ✅ "Allow GitHub Actions to create and approve pull requests" (only
-  if you also use Dependabot's auto-merge).
+**Required**: each consumer's shim must set `permissions:` on the `ci`
+job (see snippets above). Without it, the run fails with
+`startup_failure` because the caller's default GITHUB_TOKEN (typically
+read-only) cannot grant `pull-requests: write` to the sticky-comment
+jobs.
+
+Optional (alternative): set the repo default to "Read and write" in
+`Settings → Actions → General → Workflow permissions`. Per-job
+permissions are still safer (least privilege) and recommended.
 
 ---
 
