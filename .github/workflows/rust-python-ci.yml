@@ -279,7 +279,7 @@ jobs:
         # accidental discovery of the source dir as an importable package.
         # Use absolute PY because cwd changed.
         run: |
-          ABS_PY="$(realpath "$PY")"
+          ABS_PY="$GITHUB_WORKSPACE/$PY"
           cd "${{ inputs.manifest-dir }}"
           "$ABS_PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
@@ -362,7 +362,7 @@ jobs:
       - name: Run short tests
         shell: bash
         run: |
-          ABS_PY="$(realpath "$PY")"
+          ABS_PY="$GITHUB_WORKSPACE/$PY"
           cd "${{ inputs.manifest-dir }}"
           "$ABS_PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
@@ -407,7 +407,7 @@ jobs:
         # that haven't marked any tests slow yet don't red-light.
         run: |
           set +e
-          ABS_PY="$(realpath "$PY")"
+          ABS_PY="$GITHUB_WORKSPACE/$PY"
           cd "${{ inputs.manifest-dir }}"
           "$ABS_PY" -m pytest -m slow \
             --cov=${{ inputs.package-path }} \
