@@ -274,14 +274,24 @@ jobs:
           uv pip install --python "$PY" pytest pytest-cov
       - name: Run short tests
         shell: bash
+        # cd into the maturin-pyproject directory so pytest's rootdir is
+        # the python project, not the cargo workspace root. Avoids any
+        # accidental discovery of the source dir as an importable package.
+        # Use absolute PY because cwd changed.
         run: |
-          "$PY" -m pytest -m "not slow" \
+          ABS_PY="$(realpath "$PY")"
+          cd "${{ inputs.manifest-dir }}"
+          "$ABS_PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
             --cov-fail-under=${{ inputs.cov-fail-under }} \
             | tee pytest-coverage.txt
+          # Move outputs back to repo root for upload-artifact compatibility.
+          mv pytest-coverage.txt "$GITHUB_WORKSPACE/" 2>/dev/null || true
+          mv coverage.xml "$GITHUB_WORKSPACE/" 2>/dev/null || true
+          mv htmlcov "$GITHUB_WORKSPACE/" 2>/dev/null || true
       - name: Upload htmlcov (Linux 3.12 only)
         if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
         uses: actions/upload-artifact@v4
@@ -352,7 +362,9 @@ jobs:
       - name: Run short tests
         shell: bash
         run: |
-          "$PY" -m pytest -m "not slow" \
+          ABS_PY="$(realpath "$PY")"
+          cd "${{ inputs.manifest-dir }}"
+          "$ABS_PY" -m pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
             --cov-report=term-missing \
             --cov-fail-under=${{ inputs.cov-fail-under }}
@@ -395,7 +407,9 @@ jobs:
         # that haven't marked any tests slow yet don't red-light.
         run: |
           set +e
-          "$PY" -m pytest -m slow \
+          ABS_PY="$(realpath "$PY")"
+          cd "${{ inputs.manifest-dir }}"
+          "$ABS_PY" -m pytest -m slow \
             --cov=${{ inputs.package-path }} \
             --cov-append \
             --cov-report=term-missing \
