@@ -1,0 +1,181 @@
+# Reusable: Version-bump check.
+#
+# Fails the PR unless every file listed in `version-files` reports a
+# version strictly greater than the same file on `base-ref`.
+#
+# Skips the check entirely if every file changed in the PR matches the
+# skip-paths regex (docs, .github, LICENSE, etc.). Test-only changes
+# count as needing a bump and are not in the default skip list.
+#
+# Versions in pyproject.toml are compared via packaging.version.Version.
+# Versions in Cargo.toml are compared via the Python `semver` package
+# (semver-compatible). Both files in one repo (Rust+Py) get checked
+# independently; the gate fails if either lags.
+
+name: version-check
+
+on:
+  workflow_call:
+    inputs:
+      version-files:
+        description: 'JSON array of version-bearing files (relative paths). Both pyproject.toml and Cargo.toml supported.'
+        type: string
+        default: '["pyproject.toml"]'
+      base-ref:
+        description: 'Base ref to compare against (defaults to PR base).'
+        type: string
+        default: ''
+      skip-paths-regex:
+        description: 'Extended-regex matched per-file. If every changed file matches, the bump check is skipped.'
+        type: string
+        default: '^(\.github/|docs/|.*\.md$|\.gitignore$|LICENSE$|\.pre-commit-config\.yaml$)'
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve base ref
+        id: base
+        env:
+          INPUT_BASE_REF: ${{ inputs.base-ref }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -n "$INPUT_BASE_REF" ]; then
+            ref="$INPUT_BASE_REF"
+          elif [ -n "$PR_BASE_REF" ]; then
+            ref="$PR_BASE_REF"
+          else
+            ref="main"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Using base ref: $ref"
+
+      - name: Determine if check applies (skip-paths)
+        id: applies
+        env:
+          SKIP_RE: ${{ inputs.skip-paths-regex }}
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "origin/${BASE_REF}"...HEAD)
+          if [ -z "$changed" ]; then
+            echo "No files changed vs base; skipping."
+            echo "applies=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "$changed"
+          # If every changed file matches the skip pattern, skip the check.
+          non_skip=$(echo "$changed" | grep -Ev "$SKIP_RE" || true)
+          if [ -z "$non_skip" ]; then
+            echo "All changed files match skip regex; skipping version-bump check."
+            echo "applies=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Non-skip files require a version bump:"
+            echo "$non_skip"
+            echo "applies=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.applies.outputs.applies == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install version-comparison deps
+        if: steps.applies.outputs.applies == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install packaging tomli semver
+
+      - name: Compare versions
+        if: steps.applies.outputs.applies == 'true'
+        env:
+          FILES_JSON: ${{ inputs.version-files }}
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess, sys, tomllib
+          from packaging.version import Version, InvalidVersion
+          import semver
+
+          files = json.loads(os.environ["FILES_JSON"])
+          base = os.environ["BASE_REF"]
+
+          def read_pyproject_version(content: bytes) -> str:
+              data = tomllib.loads(content.decode("utf-8"))
+              v = data.get("project", {}).get("version")
+              if v is None:
+                  raise SystemExit(
+                      "pyproject.toml has no [project].version (dynamic version "
+                      "not yet supported by this gate)"
+                  )
+              return v
+
+          def read_cargo_version(content: bytes) -> str:
+              data = tomllib.loads(content.decode("utf-8"))
+              # Either [package].version or [workspace.package].version
+              pkg = data.get("package") or data.get("workspace", {}).get("package", {})
+              v = pkg.get("version") if isinstance(pkg, dict) else None
+              if v is None:
+                  raise SystemExit("Cargo.toml has no [package]/[workspace.package].version")
+              return v
+
+          def head_bytes(path: str) -> bytes:
+              with open(path, "rb") as f:
+                  return f.read()
+
+          def base_bytes(path: str) -> bytes | None:
+              try:
+                  return subprocess.check_output(
+                      ["git", "show", f"origin/{base}:{path}"],
+                      stderr=subprocess.DEVNULL,
+                  )
+              except subprocess.CalledProcessError:
+                  return None  # File didn't exist on base; treat as new file (bump trivially satisfied).
+
+          failures = []
+          for f in files:
+              if f.endswith("pyproject.toml"):
+                  read = read_pyproject_version
+                  cmp_lt = lambda a, b: Version(a) <= Version(b)
+                  display = "PEP 440"
+              elif f.endswith("Cargo.toml"):
+                  read = read_cargo_version
+                  cmp_lt = lambda a, b: semver.Version.parse(a) <= semver.Version.parse(b)
+                  display = "SemVer"
+              else:
+                  failures.append(f"{f}: unrecognized version file (want pyproject.toml or Cargo.toml)")
+                  continue
+
+              head = read(head_bytes(f))
+              base_raw = base_bytes(f)
+              if base_raw is None:
+                  print(f"{f}: new file on this branch (version={head}); bump check trivially satisfied")
+                  continue
+              base_v = read(base_raw)
+              print(f"{f}: base={base_v} head={head} ({display})")
+              if cmp_lt(head, base_v):
+                  failures.append(
+                      f"{f}: head version {head} must be strictly greater than base version {base_v}"
+                  )
+
+          if failures:
+              print()
+              print("Version-bump check FAILED:")
+              for msg in failures:
+                  print(f"  - {msg}")
+              sys.exit(1)
+          print()
+          print("Version-bump check passed.")
+          PY
+
+      - name: Note skip
+        if: steps.applies.outputs.applies != 'true'
+        run: echo "Version-bump check skipped (only skip-path files changed)."

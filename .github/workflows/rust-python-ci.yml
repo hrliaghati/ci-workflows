@@ -1,0 +1,388 @@
+# Reusable: Rust + Python (PyO3 + maturin) CI.
+#
+# Two build modes:
+#   abi3=true  → one wheel per OS that works on all Python versions
+#                listed in `python-versions` (must all be >= the abi3
+#                floor encoded in the consumer's Cargo.toml).
+#   abi3=false → per-CPython wheels: one wheel per (OS × Python). Use
+#                this when the Rust crate uses APIs that don't fit abi3
+#                (e.g. numpy C API, like orbprop).
+#
+# Build matrix:
+#   PR  : ubuntu + windows
+#   main: ubuntu + windows + macOS (so the macOS wheel exists by tag time)
+#
+# macOS short-test job builds its own wheel inline on PRs (since the
+# build matrix excludes macOS on PRs). On main pushes it downloads the
+# macOS wheel from the build-macos job.
+
+name: rust-python-ci
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: 'Distribution name (matches [project].name in the maturin pyproject.toml).'
+        type: string
+        required: true
+      package-path:
+        description: 'Coverage target. Pass to --cov= as-is (e.g. routelib).'
+        type: string
+        required: true
+      manifest-dir:
+        description: 'Directory containing the maturin pyproject.toml. Use "." when it lives at the repo root.'
+        type: string
+        default: '.'
+      abi3:
+        description: 'true → one wheel per OS (abi3); false → one wheel per (OS, Python) combination.'
+        type: boolean
+        default: true
+      python-versions:
+        description: 'JSON array of Python versions for short tests (and per-CPython build matrix when abi3=false).'
+        type: string
+        default: '["3.10","3.11","3.12","3.13","3.14"]'
+      slow-test-versions:
+        description: 'JSON array of Python versions for slow tests (Linux + Windows only).'
+        type: string
+        default: '["3.10","3.14"]'
+      macos-short-test-version:
+        description: 'Single Python version for macOS short-test job. macOS is excluded from slow tests.'
+        type: string
+        default: '3.12'
+      cov-fail-under:
+        description: 'pytest --cov-fail-under threshold (whole percent).'
+        type: number
+        default: 80
+      cargo-fail-under-lines:
+        description: 'cargo-llvm-cov --fail-under-lines threshold.'
+        type: number
+        default: 80
+      mypy-path:
+        description: 'Path passed to mypy. Empty string disables mypy.'
+        type: string
+        default: ''
+      windows-allow-fail:
+        description: 'If true, Windows test jobs use continue-on-error: true.'
+        type: boolean
+        default: false
+      version-files:
+        description: 'JSON array of version-bearing files for the version-bump gate.'
+        type: string
+        default: '["pyproject.toml","Cargo.toml"]'
+      version-skip-paths-regex:
+        type: string
+        default: '^(\.github/|docs/|.*\.md$|\.gitignore$|LICENSE$|\.pre-commit-config\.yaml$)'
+      uv-version:
+        type: string
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------- Lint (Python) ---------------------------------------------
+  lint-py:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install 3.12
+      - name: Install ruff (and mypy if requested)
+        run: |
+          uv pip install --system ruff
+          if [ -n "${{ inputs.mypy-path }}" ]; then uv pip install --system mypy; fi
+      - run: ruff check ${{ inputs.manifest-dir }}
+      - run: ruff format --check ${{ inputs.manifest-dir }}
+      - name: mypy
+        if: inputs.mypy-path != ''
+        run: mypy ${{ inputs.mypy-path }}
+
+  # -------- Rust: fmt / clippy / test / coverage ----------------------
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --workspace -- -D warnings
+      - run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: cargo llvm-cov (Rust coverage with floor)
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info \
+            --fail-under-lines ${{ inputs.cargo-fail-under-lines }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-lcov
+          path: lcov.info
+          retention-days: 14
+
+  # -------- Version-bump gate -----------------------------------------
+  version-check:
+    uses: hrliaghati/ci-workflows/.github/workflows/version-check.yml@main
+    with:
+      version-files: ${{ inputs.version-files }}
+      skip-paths-regex: ${{ inputs.version-skip-paths-regex }}
+
+  # -------- Build wheels: Linux + Windows (always) --------------------
+  # When abi3=true, matrix.py is just '3.12' (one wheel per OS that
+  # works for all Python). When abi3=false, full per-CPython matrix.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ${{ fromJSON(inputs.abi3 && '["3.12"]' || inputs.python-versions) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.manifest-dir }}
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ inputs.manifest-dir }}
+          command: build
+          args: --release --interpreter ${{ matrix.py }}
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ matrix.py }}
+          path: ${{ inputs.manifest-dir }}/target/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------- Build wheels: macOS (only on main pushes) -----------------
+  build-macos:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ${{ fromJSON(inputs.abi3 && '["3.12"]' || inputs.python-versions) }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.manifest-dir }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ inputs.manifest-dir }}
+          command: build
+          args: --release --interpreter ${{ matrix.py }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-macos-latest-${{ matrix.py }}
+          path: ${{ inputs.manifest-dir }}/target/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------- Wheel sticky comment (PR only) ----------------------------
+  wheel-comment:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: wheel-artifact
+          message: |
+            ### Wheels (`${{ inputs.package-name }}`)
+
+            Mode: ${{ inputs.abi3 && 'abi3 (one wheel per OS, works on all listed Python versions)' || 'per-CPython (one wheel per OS × Python)' }}
+
+            Download from this run's
+            [Artifacts panel](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts).
+
+            PRs build Linux + Windows wheels. macOS wheels are built only on `main` pushes.
+
+            Updated automatically on each push to this PR.
+
+  # -------- Short tests -----------------------------------------------
+  # Three sub-jobs, joined by the same `test-short` name in branch
+  # protection: linux/windows/macos. Splitting them avoids the
+  # download-vs-inline branching when matrixing all three OSes together.
+  test-short-linux-windows:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ${{ fromJSON(inputs.python-versions) }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ matrix.py }}
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
+          path: dist
+      - name: Install wheel + test deps
+        shell: bash
+        run: |
+          uv venv --python ${{ matrix.py }}
+          uv pip install "$(ls dist/*.whl | head -n1)"
+          uv pip install pytest pytest-cov
+      - name: Run short tests
+        shell: bash
+        run: |
+          uv run pytest -m "not slow" \
+            --cov=${{ inputs.package-path }} \
+            --cov-report=term \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=${{ inputs.cov-fail-under }} \
+            | tee pytest-coverage.txt
+      - name: Upload htmlcov (Linux 3.12 only)
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-short
+          path: htmlcov
+          retention-days: 14
+      - name: Upload coverage artifact for sticky comment
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-short
+          path: |
+            coverage.xml
+            pytest-coverage.txt
+          retention-days: 1
+
+  test-short-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.manifest-dir }}
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ inputs.macos-short-test-version }}
+
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: ${{ inputs.macos-short-test-version }}
+
+      # On PRs we build inline (PR build matrix excludes macOS).
+      - name: Build wheel inline (PR only)
+        if: github.event_name == 'pull_request'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ inputs.manifest-dir }}
+          command: build
+          args: --release --interpreter ${{ inputs.macos-short-test-version }}
+
+      # On main pushes we download from build-macos.
+      - name: Download macOS wheel (main push)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-macos-latest-${{ inputs.abi3 && '3.12' || inputs.macos-short-test-version }}
+          path: dist
+
+      - name: Install wheel + test deps
+        shell: bash
+        run: |
+          uv venv --python ${{ inputs.macos-short-test-version }}
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            wheel=$(ls "${{ inputs.manifest-dir }}/target/wheels/"*.whl | head -n1)
+          else
+            wheel=$(ls dist/*.whl | head -n1)
+          fi
+          uv pip install "$wheel"
+          uv pip install pytest pytest-cov
+      - name: Run short tests
+        shell: bash
+        run: |
+          uv run pytest -m "not slow" \
+            --cov=${{ inputs.package-path }} \
+            --cov-report=term \
+            --cov-fail-under=${{ inputs.cov-fail-under }}
+
+  # -------- Slow tests ------------------------------------------------
+  test-slow:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ${{ fromJSON(inputs.slow-test-versions) }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ matrix.py }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
+          path: dist
+      - name: Install wheel + test deps
+        shell: bash
+        run: |
+          uv venv --python ${{ matrix.py }}
+          uv pip install "$(ls dist/*.whl | head -n1)"
+          uv pip install pytest pytest-cov
+      - name: Run slow tests
+        shell: bash
+        run: |
+          uv run pytest -m slow \
+            --cov=${{ inputs.package-path }} \
+            --cov-append \
+            --cov-report=term \
+            --cov-report=xml \
+            --cov-fail-under=${{ inputs.cov-fail-under }}
+
+  # -------- Coverage sticky PR comment --------------------------------
+  coverage-comment:
+    needs: test-short-linux-windows
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml-short
+          path: .
+      - uses: MishaKav/pytest-coverage-comment@v1.1.52
+        with:
+          pytest-coverage-path: pytest-coverage.txt
+          junitxml-path: ''
+          report-only-changed-files: false
+          unique-id-for-comment: pytest-coverage

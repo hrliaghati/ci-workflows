@@ -1,0 +1,256 @@
+# Reusable: Pure-Python CI.
+#
+# Builds the wheel via `uv build`, runs short + slow tests across the
+# Python matrix with self-contained pytest coverage (no Codecov), and
+# surfaces the wheel + coverage on the PR via sticky comments.
+#
+# Inputs let each consumer tweak its matrix without forking this file.
+# See the README in this repo for the full input spec and a copy-paste
+# starter shim.
+
+name: python-ci
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: 'Distribution name (matches [project].name in pyproject.toml).'
+        type: string
+        required: true
+      package-path:
+        description: 'Coverage target. Pass to --cov= as-is. Either a directory (e.g. src/scotty) or a single .py file (e.g. track_manager).'
+        type: string
+        required: true
+      python-versions:
+        description: 'JSON array of Python versions for short tests (Linux + Windows).'
+        type: string
+        default: '["3.10","3.11","3.12","3.13","3.14"]'
+      slow-test-versions:
+        description: 'JSON array of Python versions for slow tests (Linux + Windows only).'
+        type: string
+        default: '["3.10","3.14"]'
+      macos-short-test-version:
+        description: 'Single Python version for macOS short-test job. macOS is excluded from slow tests.'
+        type: string
+        default: '3.12'
+      cov-fail-under:
+        description: 'pytest --cov-fail-under threshold (whole percent).'
+        type: number
+        default: 80
+      mypy-path:
+        description: 'Path passed to mypy. Empty string disables mypy.'
+        type: string
+        default: ''
+      windows-allow-fail:
+        description: 'If true, all Windows test jobs use continue-on-error: true.'
+        type: boolean
+        default: false
+      version-files:
+        description: 'JSON array of version-bearing files for the version-bump gate.'
+        type: string
+        default: '["pyproject.toml"]'
+      version-skip-paths-regex:
+        type: string
+        default: '^(\.github/|docs/|.*\.md$|\.gitignore$|LICENSE$|\.pre-commit-config\.yaml$)'
+      uv-version:
+        type: string
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------- Lint -------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install 3.12
+      - name: uv sync (with extras if present)
+        run: uv sync --all-extras || uv sync
+      - run: uv pip install ruff
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: mypy
+        if: inputs.mypy-path != ''
+        run: |
+          uv pip install mypy
+          uv run mypy ${{ inputs.mypy-path }}
+
+  # -------- Version-bump gate ------------------------------------------
+  version-check:
+    uses: hrliaghati/ci-workflows/.github/workflows/version-check.yml@main
+    with:
+      version-files: ${{ inputs.version-files }}
+      skip-paths-regex: ${{ inputs.version-skip-paths-regex }}
+
+  # -------- Build wheel ------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install 3.12
+      - name: Read version
+        id: version
+        run: |
+          v=$(uv run --with tomli python -c "import tomli; print(tomli.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - run: uv build --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ inputs.package-name }}-${{ steps.version.outputs.version }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------- Wheel sticky comment (PR only) ----------------------------
+  wheel-comment:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: wheel-artifact
+          message: |
+            ### Wheel artifact (`${{ inputs.package-name }} ${{ needs.build.outputs.version }}`)
+
+            Download from this run's
+            [Artifacts panel](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts).
+
+            Look for `wheel-${{ inputs.package-name }}-${{ needs.build.outputs.version }}`.
+
+            Updated automatically on each push to this PR.
+
+  # -------- Short tests: Linux + Windows ------------------------------
+  test-short-linux-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ${{ fromJSON(inputs.python-versions) }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ matrix.py }}
+      - name: uv sync
+        shell: bash
+        run: |
+          uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
+          uv pip install --python ${{ matrix.py }} pytest pytest-cov
+      - name: Run short tests
+        shell: bash
+        run: |
+          uv run --python ${{ matrix.py }} pytest -m "not slow" \
+            --cov=${{ inputs.package-path }} \
+            --cov-report=term \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=${{ inputs.cov-fail-under }} \
+            | tee pytest-coverage.txt
+      - name: Upload htmlcov (Linux 3.12 only)
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-short
+          path: htmlcov
+          retention-days: 14
+      - name: Upload coverage artifact for sticky comment
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-short
+          path: |
+            coverage.xml
+            pytest-coverage.txt
+          retention-days: 1
+
+  # -------- Short tests: macOS (canary version only) ------------------
+  test-short-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ inputs.macos-short-test-version }}
+      - name: uv sync
+        run: |
+          uv sync --all-extras --python ${{ inputs.macos-short-test-version }} \
+            || uv sync --python ${{ inputs.macos-short-test-version }}
+          uv pip install --python ${{ inputs.macos-short-test-version }} pytest pytest-cov
+      - name: Run short tests
+        run: |
+          uv run --python ${{ inputs.macos-short-test-version }} pytest -m "not slow" \
+            --cov=${{ inputs.package-path }} \
+            --cov-report=term \
+            --cov-fail-under=${{ inputs.cov-fail-under }}
+
+  # -------- Slow tests (Linux + Windows on lo+hi versions) ------------
+  test-slow:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        py: ${{ fromJSON(inputs.slow-test-versions) }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          version: ${{ inputs.uv-version }}
+      - run: uv python install ${{ matrix.py }}
+      - name: uv sync
+        shell: bash
+        run: |
+          uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
+          uv pip install --python ${{ matrix.py }} pytest pytest-cov
+      - name: Run slow tests
+        shell: bash
+        run: |
+          uv run --python ${{ matrix.py }} pytest -m slow \
+            --cov=${{ inputs.package-path }} \
+            --cov-append \
+            --cov-report=term \
+            --cov-report=xml \
+            --cov-fail-under=${{ inputs.cov-fail-under }}
+
+  # -------- Coverage sticky PR comment --------------------------------
+  coverage-comment:
+    needs: test-short-linux-windows
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml-short
+          path: .
+      - uses: MishaKav/pytest-coverage-comment@v1.1.52
+        with:
+          pytest-coverage-path: pytest-coverage.txt
+          junitxml-path: ''
+          report-only-changed-files: false
+          unique-id-for-comment: pytest-coverage
