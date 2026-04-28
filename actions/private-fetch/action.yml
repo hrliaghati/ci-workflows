@@ -1,0 +1,41 @@
+name: 'Configure private cross-repo fetch'
+description: |
+  Mint a short-lived GitHub App token via CI_APP_ID + CI_APP_PRIVATE_KEY
+  (expected to be set as secrets on each consuming repo) and configure
+  git to use it for HTTPS fetches on github.com (and to rewrite ssh://
+  URLs to HTTPS). This lets cargo and pip resolve private cohort
+  cross-repo dependencies (orbprop, routelib, etc.) inside CI runs.
+
+  No-op (silent) when the secrets aren't set — repos that don't have
+  cross-repo deps don't need configuration.
+
+inputs:
+  app-id:
+    description: 'CI_APP_ID secret (pass via secrets.CI_APP_ID)'
+    required: false
+  private-key:
+    description: 'CI_APP_PRIVATE_KEY secret (pass via secrets.CI_APP_PRIVATE_KEY)'
+    required: false
+  owner:
+    description: 'GitHub owner (defaults to current repository owner)'
+    required: false
+    default: ${{ github.repository_owner }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/create-github-app-token@v1
+      id: token
+      continue-on-error: true
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ inputs.owner }}
+    - name: Configure git url rewrites
+      if: steps.token.outputs.token != ''
+      shell: bash
+      run: |
+        T='${{ steps.token.outputs.token }}'
+        git config --global url."https://x-access-token:${T}@github.com/".insteadOf "https://github.com/"
+        git config --global url."https://x-access-token:${T}@github.com/".insteadOf "ssh://git@github.com/"
+        echo "::add-mask::$T"
