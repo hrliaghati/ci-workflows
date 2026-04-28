@@ -65,7 +65,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hrliaghati/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ secrets.CI_APP_ID }}
@@ -100,7 +100,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hrliaghati/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ secrets.CI_APP_ID }}
@@ -155,7 +155,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hrliaghati/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ secrets.CI_APP_ID }}
@@ -202,7 +202,7 @@ jobs:
   test-short-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hrliaghati/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ secrets.CI_APP_ID }}
@@ -235,7 +235,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hrliaghati/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ secrets.CI_APP_ID }}
