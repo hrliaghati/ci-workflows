@@ -120,7 +120,7 @@ jobs:
         with:
           app-id: ${{ secrets.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
@@ -170,7 +170,7 @@ jobs:
         with:
           app-id: ${{ secrets.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.py }}
       - uses: dtolnay/rust-toolchain@stable
@@ -208,7 +208,7 @@ jobs:
         with:
           app-id: ${{ secrets.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.py }}
       - uses: dtolnay/rust-toolchain@stable
@@ -348,7 +348,7 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ inputs.macos-short-test-version }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: github.event_name == 'pull_request'
         with:
           python-version: ${{ inputs.macos-short-test-version }}
