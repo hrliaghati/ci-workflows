@@ -231,7 +231,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-${{ inputs.package-name }}
           path: dist/
@@ -283,7 +283,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-${{ inputs.package-name }}
           path: dist/
@@ -328,7 +328,7 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-${{ inputs.package-name }}
           path: dist/
