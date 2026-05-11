@@ -5,11 +5,10 @@ description: |
   fetch via that token. Lets cargo and pip resolve private cohort
   cross-repo dependencies (orbprop, routelib, etc.) inside CI runs.
 
-  The org standard is the `equiped-release-bot` App (id 3680486, public)
-  with the private key deployed as `RELEASE_BOT_PRIVATE_KEY` on each
-  consumer. Callers typically pass:
-      app-id: '3680486'
-      private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+  The org standard is the equiped-release-bot App (id 3680486, public)
+  with the private key deployed as RELEASE_BOT_PRIVATE_KEY on each
+  consumer. Callers typically pass app-id 3680486 and private-key from
+  secrets.RELEASE_BOT_PRIVATE_KEY.
 
   No-op (silent) when inputs are empty — repos that don't have
   cross-repo deps can include the step unconditionally.
