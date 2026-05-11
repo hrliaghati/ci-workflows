@@ -36,11 +36,22 @@ runs:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ inputs.owner }}
-    - name: Configure git url rewrites
-      if: steps.token.outputs.token != ''
+    - name: Configure git url rewrites (non-Windows)
+      if: steps.token.outputs.token != '' && runner.os != 'Windows'
       shell: bash
       run: |
         T='${{ steps.token.outputs.token }}'
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "https://github.com/"
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "ssh://git@github.com/"
         echo "::add-mask::$T"
+    - name: Configure git url rewrites (Windows)
+      # The self-hosted Windows runner has WSL's bash.exe on PATH but
+      # no WSL distro installed, so `shell: bash` fails immediately.
+      # Use PowerShell, which the runner always has.
+      if: steps.token.outputs.token != '' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $T = '${{ steps.token.outputs.token }}'
+        git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "https://github.com/"
+        git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "ssh://git@github.com/"
+        Write-Host "::add-mask::$T"
