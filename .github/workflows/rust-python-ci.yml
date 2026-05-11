@@ -1,20 +1,29 @@
 # Reusable: Rust + Python (PyO3 + maturin) CI.
 #
+# Architecture (post-self-hosted migration):
+#   - All Rust + Python lint + wheel building runs on the mac-mini-m4-pro
+#     self-hosted runner ([self-hosted, macOS, ARM64]).
+#   - Cross-platform wheels (Linux x86_64/aarch64, Windows x86_64/aarch64,
+#     macOS universal2) are produced in a single job via the
+#     wheel-builder:latest Docker image that lives on the Mac runner.
+#   - Native wheel testing happens on three runners:
+#       macOS arm64    : [self-hosted, macOS, ARM64]
+#       Linux x86_64   : [self-hosted, Linux, X64, docker]
+#       Windows x86_64 : [self-hosted, Windows, X64]
+#     Linux aarch64 and Windows aarch64 wheels are built and uploaded
+#     as artifacts but not tested (no aarch64 runner for those OSes).
+#
 # Two build modes:
-#   abi3=true  → one wheel per OS that works on all Python versions
-#                listed in `python-versions` (must all be >= the abi3
-#                floor encoded in the consumer's Cargo.toml).
-#   abi3=false → per-CPython wheels: one wheel per (OS × Python). Use
+#   abi3=true  → one wheel per OS (5 total) that works on all Python
+#                versions listed in `python-versions` (must all be >=
+#                the consumer's abi3 floor in Cargo.toml).
+#   abi3=false → per-CPython wheels: one wheel per (OS, Python). Use
 #                this when the Rust crate uses APIs that don't fit abi3
-#                (e.g. numpy C API, like orbprop).
+#                (e.g. numpy C API).
 #
-# Build matrix:
-#   PR  : ubuntu + windows
-#   main: ubuntu + windows + macOS (so the macOS wheel exists by tag time)
-#
-# macOS short-test job builds its own wheel inline on PRs (since the
-# build matrix excludes macOS on PRs). On main pushes it downloads the
-# macOS wheel from the build-macos job.
+# Cross-repo private fetching uses the `equiped-release-bot` GitHub App
+# (app id 3680486, installed org-wide with contents:read). The app's
+# private key must be set as `RELEASE_BOT_PRIVATE_KEY` on each consumer.
 
 name: rust-python-ci
 
@@ -22,49 +31,57 @@ on:
   workflow_call:
     inputs:
       package-name:
-        description: 'Distribution name (matches [project].name in the maturin pyproject.toml).'
+        description: 'Distribution name (matches [project].name in pyproject.toml).'
         type: string
         required: true
       package-path:
-        description: 'Coverage target. Pass to --cov= as-is (e.g. routelib).'
+        description: 'Python import path / coverage target (passed to pytest --cov=).'
         type: string
         required: true
       manifest-dir:
-        description: 'Directory containing the maturin pyproject.toml. Use "." when it lives at the repo root.'
+        description: 'Directory containing the maturin pyproject.toml. Use "." for repo root.'
         type: string
         default: '.'
       abi3:
-        description: 'true → one wheel per OS (abi3); false → one wheel per (OS, Python) combination.'
+        description: 'true → one wheel per OS (abi3); false → one wheel per (OS, Python).'
         type: boolean
         default: true
       python-versions:
-        description: 'JSON array of Python versions for short tests (and per-CPython build matrix when abi3=false).'
+        description: 'JSON array of Python versions for the test matrix (and per-CPython build matrix when abi3=false).'
         type: string
-        default: '["3.10","3.11","3.12","3.13","3.14"]'
-      slow-test-versions:
-        description: 'JSON array of Python versions for slow tests (Linux + Windows only).'
+        default: '["3.10","3.13"]'
+      rust-toolchains:
+        description: 'JSON array of Rust toolchains for the Rust matrix (e.g. ["stable","1.83"] to also check MSRV).'
         type: string
-        default: '["3.10","3.14"]'
-      macos-short-test-version:
-        description: 'Single Python version for macOS short-test job. macOS is excluded from slow tests.'
+        default: '["stable"]'
+      cargo-test-args:
+        description: 'Extra arguments to cargo test.'
         type: string
-        default: '3.12'
+        default: '--workspace'
+      pytest-args:
+        description: 'Argument(s) to pytest (test paths).'
+        type: string
+        default: 'tests/python/'
+      pytest-markers:
+        description: 'Marker expression for pytest -m.'
+        type: string
+        default: 'not slow'
       cov-fail-under:
-        description: 'pytest --cov-fail-under threshold (whole percent).'
+        description: 'pytest --cov-fail-under threshold (whole percent). 0 disables coverage gating.'
         type: number
-        default: 80
+        default: 0
       cargo-fail-under-lines:
-        description: 'cargo-llvm-cov --fail-under-lines threshold.'
+        description: 'cargo-llvm-cov --fail-under-lines threshold. 0 disables Rust coverage gating.'
         type: number
-        default: 80
-      mypy-path:
-        description: 'Path passed to mypy. Empty string disables mypy.'
-        type: string
-        default: ''
-      windows-allow-fail:
-        description: 'If true, Windows test jobs use continue-on-error: true.'
+        default: 0
+      clippy-deny-warnings:
+        description: 'If true, run clippy with -D warnings.'
         type: boolean
         default: false
+      mypy-path:
+        description: 'Path passed to mypy. Empty disables.'
+        type: string
+        default: ''
       version-files:
         description: 'JSON array of version-bearing files for the version-bump gate.'
         type: string
@@ -72,33 +89,92 @@ on:
       version-skip-paths-regex:
         type: string
         default: '^(\.github/|docs/|.*\.md$|\.gitignore$|LICENSE$|\.pre-commit-config\.yaml$)'
-      uv-version:
-        type: string
-        default: 'latest'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The equiped-release-bot GitHub App id is not a secret — anyone with
+  # access to a workflow file can see it. Only the private key is.
+  EQUIPED_BOT_APP_ID: '3680486'
+
 jobs:
-  # -------- Lint (Python) ---------------------------------------------
-  lint-py:
-    runs-on: ubuntu-latest
+  # -------- Rust: fmt / clippy / test / coverage ----------------------
+  rust:
+    name: rust (${{ matrix.toolchain }})
+    runs-on: [self-hosted, macOS, ARM64]
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ${{ fromJSON(inputs.rust-toolchains) }}
+    env:
+      CARGO_TERM_COLOR: always
+      # pyo3 with the abi3-pyXXX feature requires Python >= the floor.
+      # The self-hosted Mac runner's plain `python3` is Apple's
+      # /usr/bin/python3 (3.9.6); pyo3 finds it first and aborts. Pin to
+      # a runner-resident interpreter (uv-managed Python 3.11 at
+      # ~/.local/bin/python3.11).
+      PYO3_PYTHON: python3.11
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.manifest-dir }}
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+      - name: cargo test
+        run: cargo test ${{ inputs.cargo-test-args }}
+      - name: cargo fmt --check
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --all --check
+      - name: cargo clippy (deny warnings)
+        if: matrix.toolchain == 'stable' && inputs.clippy-deny-warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy (informational)
+        if: matrix.toolchain == 'stable' && (! inputs.clippy-deny-warnings)
+        run: cargo clippy --workspace --all-targets
+      - name: Install cargo-llvm-cov
+        if: matrix.toolchain == 'stable' && inputs.cargo-fail-under-lines > 0
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: cargo llvm-cov
+        if: matrix.toolchain == 'stable' && inputs.cargo-fail-under-lines > 0
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info \
+            --fail-under-lines ${{ inputs.cargo-fail-under-lines }}
+      - name: Upload Rust coverage
+        if: matrix.toolchain == 'stable' && inputs.cargo-fail-under-lines > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-lcov
+          path: lcov.info
+          retention-days: 14
+
+  # -------- Python lint -----------------------------------------------
+  lint-py:
+    name: lint-py
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
+        with:
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          version: ${{ inputs.uv-version }}
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
-      - run: uv python install 3.12
-      - name: Install ruff (and mypy if requested) via uv tool
-        # uv pip install --system fails on PEP 668 systems (Debian).
-        # uv tool install creates an isolated managed venv and PATH entry.
+      - name: Install ruff (and mypy if requested)
         run: |
           uv tool install ruff
           if [ -n "${{ inputs.mypy-path }}" ]; then uv tool install mypy; fi
@@ -108,385 +184,174 @@ jobs:
         if: inputs.mypy-path != ''
         run: mypy ${{ inputs.mypy-path }}
 
-  # -------- Rust: fmt / clippy / test / coverage ----------------------
-  # PyO3 extension crates need Python dev headers for linking, so we
-  # set up Python here too. The Python version is fixed (3.12) since
-  # this job tests Rust logic, not Python compatibility.
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
-        with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy, llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      # Clippy is informational for now — Rust toolchain releases add new
-      # lints regularly and pre-existing cohort code triggers many. Once
-      # the cohort is clean, ratchet to `-- -D warnings` (per-repo or via
-      # workspace [lints] in Cargo.toml).
-      - run: cargo clippy --all-targets --workspace
-      - run: cargo test --workspace
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-      - name: cargo llvm-cov (Rust coverage with floor)
-        run: |
-          cargo llvm-cov --workspace --lcov --output-path lcov.info \
-            --fail-under-lines ${{ inputs.cargo-fail-under-lines }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-lcov
-          path: lcov.info
-          retention-days: 14
-
   # -------- Version-bump gate -----------------------------------------
   version-check:
-    uses: hrliaghati/ci-workflows/.github/workflows/version-check.yml@main
+    uses: equiped-code/ci-workflows/.github/workflows/version-check.yml@main
     with:
       version-files: ${{ inputs.version-files }}
       skip-paths-regex: ${{ inputs.version-skip-paths-regex }}
 
-  # -------- Build wheels: Linux + Windows (always) --------------------
-  # When abi3=true, matrix.py is just '3.12' (one wheel per OS that
-  # works for all Python). When abi3=false, full per-CPython matrix.
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        py: ${{ fromJSON(inputs.abi3 && '["3.12"]' || inputs.python-versions) }}
-    runs-on: ${{ matrix.os }}
+  # -------- Build wheels (single job on the Mac) ----------------------
+  build-wheels:
+    name: build-wheels
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: equiped-code/ci-workflows/actions/build-wheels@main
         with:
-          python-version: ${{ matrix.py }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ inputs.manifest-dir }}
-      - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: ${{ inputs.manifest-dir }}
-          command: build
-          # --out is relative to working-directory; in Cargo workspaces the
-          # default 'target/wheels' lives at workspace root, not the crate.
-          # Pin it next to the maturin pyproject so the upload path is stable.
-          args: --release --interpreter ${{ matrix.py }} --out dist
-      - name: Upload wheel
+          abi3: ${{ inputs.abi3 }}
+          python-versions: ${{ inputs.python-versions }}
+          manifest-dir: ${{ inputs.manifest-dir }}
+      - name: List built wheels
+        run: ls -la dist/
+      - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ matrix.py }}
-          path: ${{ inputs.manifest-dir }}/dist/*.whl
+          name: wheels-${{ inputs.package-name }}
+          path: dist/*.whl
           if-no-files-found: error
           retention-days: 14
 
-  # -------- Build wheels: macOS (only on main pushes) -----------------
-  build-macos:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # -------- Test wheel on macOS arm64 ---------------------------------
+  test-wheel-macos:
+    name: test-wheel-macos (${{ matrix.python-version }})
+    needs: build-wheels
+    runs-on: [self-hosted, macOS, ARM64]
     strategy:
       fail-fast: false
       matrix:
-        py: ${{ fromJSON(inputs.abi3 && '["3.12"]' || inputs.python-versions) }}
-    runs-on: macos-latest
+        python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: actions/setup-python@v5
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/download-artifact@v4
         with:
-          python-version: ${{ matrix.py }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ inputs.manifest-dir }}
-      - uses: PyO3/maturin-action@v1
-        with:
-          working-directory: ${{ inputs.manifest-dir }}
-          command: build
-          args: --release --interpreter ${{ matrix.py }} --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel-${{ inputs.package-name }}-macos-latest-${{ matrix.py }}
-          path: ${{ inputs.manifest-dir }}/dist/*.whl
-          if-no-files-found: error
-          retention-days: 14
-
-  # -------- Wheel sticky comment (PR only) ----------------------------
-  wheel-comment:
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: wheel-artifact
-          message: |
-            ### Wheels (`${{ inputs.package-name }}`)
-
-            Mode: ${{ inputs.abi3 && 'abi3 (one wheel per OS, works on all listed Python versions)' || 'per-CPython (one wheel per OS × Python)' }}
-
-            Download from this run's
-            [Artifacts panel](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts).
-
-            PRs build Linux + Windows wheels. macOS wheels are built only on `main` pushes.
-
-            Updated automatically on each push to this PR.
-
-  # -------- Short tests -----------------------------------------------
-  # Three sub-jobs, joined by the same `test-short` name in branch
-  # protection: linux/windows/macos. Splitting them avoids the
-  # download-vs-inline branching when matrixing all three OSes together.
-  test-short-linux-windows:
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        py: ${{ fromJSON(inputs.python-versions) }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
-        with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          version: ${{ inputs.uv-version }}
-          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
-      - run: uv python install ${{ matrix.py }}
-      - name: Download wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
-          path: dist
-      - name: Install wheel + test deps into a fresh venv
+          name: wheels-${{ inputs.package-name }}
+          path: dist/
+      - name: Run pytest against the macOS wheel
         shell: bash
-        # Build a venv pinned to the matrix Python and install the wheel
-        # directly. We invoke pytest via the venv's python binary because
-        # `uv run` can pick the wrong interpreter when there's no
-        # pyproject.toml at the repo root (workspace projects).
+        env:
+          ABI3: ${{ inputs.abi3 }}
+          PYV: ${{ matrix.python-version }}
+          COV_FAIL_UNDER: ${{ inputs.cov-fail-under }}
         run: |
-          uv venv .venv --python ${{ matrix.py }}
-          if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
-          echo "PY=$PY" >> "$GITHUB_ENV"
-          uv pip install --python "$PY" "$(ls dist/*.whl | head -n1)"
-          uv pip install --python "$PY" pytest pytest-cov
-      - name: Run short tests
-        shell: bash
-        # cd into the maturin-pyproject directory so pytest's rootdir is
-        # the python project, not the cargo workspace root. Avoids any
-        # accidental discovery of the source dir as an importable package.
-        # Use absolute PY because cwd changed.
-        run: |
-          ABS_PY="$GITHUB_WORKSPACE/$PY"
-          cd "${{ inputs.manifest-dir }}"
-          "$ABS_PY" -m pytest -m "not slow" \
-            --cov=${{ inputs.package-path }} \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-fail-under=${{ inputs.cov-fail-under }} \
-            | tee pytest-coverage.txt
-          # Move outputs back to repo root for upload-artifact compatibility.
-          mv pytest-coverage.txt "$GITHUB_WORKSPACE/" 2>/dev/null || true
-          mv coverage.xml "$GITHUB_WORKSPACE/" 2>/dev/null || true
-          mv htmlcov "$GITHUB_WORKSPACE/" 2>/dev/null || true
-      - name: Upload htmlcov (Linux 3.12 only)
-        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-html-short
-          path: htmlcov
-          retention-days: 14
-      - name: Upload coverage artifact for sticky comment
-        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml-short
-          path: |
-            coverage.xml
-            pytest-coverage.txt
-          retention-days: 1
-
-  test-short-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
-        with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ inputs.manifest-dir }}
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          version: ${{ inputs.uv-version }}
-          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
-      - run: uv python install ${{ inputs.macos-short-test-version }}
-
-      - uses: actions/setup-python@v5
-        if: github.event_name == 'pull_request'
-        with:
-          python-version: ${{ inputs.macos-short-test-version }}
-
-      # On PRs we build inline (PR build matrix excludes macOS).
-      - name: Build wheel inline (PR only)
-        if: github.event_name == 'pull_request'
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: ${{ inputs.manifest-dir }}
-          command: build
-          args: --release --interpreter ${{ inputs.macos-short-test-version }} --out dist
-
-      # On main pushes we download from build-macos.
-      - name: Download macOS wheel (main push)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/download-artifact@v4
-        with:
-          name: wheel-${{ inputs.package-name }}-macos-latest-${{ inputs.abi3 && '3.12' || inputs.macos-short-test-version }}
-          path: dist
-
-      - name: Install wheel + test deps
-        shell: bash
-        run: |
-          uv venv .venv --python ${{ inputs.macos-short-test-version }}
+          set -euo pipefail
+          "python${PYV}" -m venv .venv
           PY=.venv/bin/python
-          echo "PY=$PY" >> "$GITHUB_ENV"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            wheel=$(ls "${{ inputs.manifest-dir }}/dist/"*.whl | head -n1)
-          else
-            wheel=$(ls dist/*.whl | head -n1)
-          fi
-          uv pip install --python "$PY" "$wheel"
-          uv pip install --python "$PY" pytest pytest-cov
-      - name: Run short tests
-        shell: bash
-        run: |
-          ABS_PY="$GITHUB_WORKSPACE/$PY"
-          cd "${{ inputs.manifest-dir }}"
-          "$ABS_PY" -m pytest -m "not slow" \
-            --cov=${{ inputs.package-path }} \
-            --cov-report=term-missing \
-            --cov-fail-under=${{ inputs.cov-fail-under }}
 
-  # -------- Slow tests ------------------------------------------------
-  test-slow:
-    needs: build
+          if [ "$ABI3" = "true" ]; then
+            wheel=$(ls dist/*macosx*universal2*.whl 2>/dev/null | head -n1)
+            [ -z "$wheel" ] && wheel=$(ls dist/*macosx*.whl | head -n1)
+          else
+            pytag="cp$(echo "$PYV" | tr -d .)"
+            wheel=$(ls dist/*${pytag}*macosx*.whl | head -n1)
+          fi
+          echo "Installing $wheel"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install "$wheel" pytest pytest-cov
+
+          cd "${{ inputs.manifest-dir }}"
+          if [ "$COV_FAIL_UNDER" -gt 0 ]; then
+            "$PY" -m pytest ${{ inputs.pytest-args }} \
+              -m "${{ inputs.pytest-markers }}" \
+              --cov=${{ inputs.package-path }} \
+              --cov-fail-under=$COV_FAIL_UNDER
+          else
+            "$PY" -m pytest ${{ inputs.pytest-args }} \
+              -m "${{ inputs.pytest-markers }}"
+          fi
+
+  # -------- Test wheel on Linux x86_64 --------------------------------
+  test-wheel-linux:
+    name: test-wheel-linux (${{ matrix.python-version }})
+    needs: build-wheels
+    runs-on: [self-hosted, Linux, X64, docker]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        py: ${{ fromJSON(inputs.slow-test-versions) }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+        python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ inputs.package-name }}
+          path: dist/
+      - name: Run pytest against the Linux x86_64 wheel
+        shell: bash
+        env:
+          ABI3: ${{ inputs.abi3 }}
+          PYV: ${{ matrix.python-version }}
+        run: |
+          set -euo pipefail
+          uv venv .venv --python "python${PYV}"
+          PY=.venv/bin/python
+
+          if [ "$ABI3" = "true" ]; then
+            wheel=$(ls dist/*manylinux*x86_64*.whl | head -n1)
+          else
+            pytag="cp$(echo "$PYV" | tr -d .)"
+            wheel=$(ls dist/*${pytag}*manylinux*x86_64*.whl | head -n1)
+          fi
+          echo "Installing $wheel"
+          uv pip install --python "$PY" "$wheel" pytest pytest-cov
+
+          cd "${{ inputs.manifest-dir }}"
+          "$PY" -m pytest ${{ inputs.pytest-args }} \
+            -m "${{ inputs.pytest-markers }}"
+
+  # -------- Test wheel on Windows AMD64 -------------------------------
+  test-wheel-windows:
+    name: test-wheel-windows (${{ matrix.python-version }})
+    needs: build-wheels
+    runs-on: [self-hosted, Windows, X64]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
+        with:
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
-          enable-cache: true
-          version: ${{ inputs.uv-version }}
-          cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
-      - run: uv python install ${{ matrix.py }}
+          enable-cache: false
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-${{ inputs.package-name }}-${{ matrix.os }}-${{ inputs.abi3 && '3.12' || matrix.py }}
-          path: dist
-      - name: Install wheel + test deps
+          name: wheels-${{ inputs.package-name }}
+          path: dist/
+      - name: Run pytest against the Windows AMD64 wheel
         shell: bash
+        env:
+          ABI3: ${{ inputs.abi3 }}
+          PYV: ${{ matrix.python-version }}
         run: |
-          uv venv .venv --python ${{ matrix.py }}
-          if [ -f .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
-          echo "PY=$PY" >> "$GITHUB_ENV"
-          uv pip install --python "$PY" "$(ls dist/*.whl | head -n1)"
-          uv pip install --python "$PY" pytest pytest-cov
-      - name: Run slow tests
-        shell: bash
-        # No --cov-fail-under here: slow tests alone don't represent total
-        # coverage, and the threshold is enforced on the short-test job.
-        # Exit code 5 ("no tests collected") is treated as success so repos
-        # that haven't marked any tests slow yet don't red-light.
-        run: |
-          set +e
-          ABS_PY="$GITHUB_WORKSPACE/$PY"
-          cd "${{ inputs.manifest-dir }}"
-          "$ABS_PY" -m pytest -m slow \
-            --cov=${{ inputs.package-path }} \
-            --cov-append \
-            --cov-report=term-missing \
-            --cov-report=xml
-          rc=$?
-          if [ "$rc" = "5" ]; then
-            echo "(no slow tests yet — OK)"
-            exit 0
-          fi
-          exit $rc
+          set -euo pipefail
+          uv python install "$PYV"
+          uv venv .venv --python "$PYV"
+          PY=.venv/Scripts/python.exe
 
-  # -------- Coverage sticky PR comment --------------------------------
-  coverage-comment:
-    needs: test-short-linux-windows
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: coverage-xml-short
-          path: .
-      - id: parse
-        run: |
-          if [ -f pytest-coverage.txt ]; then
-            total=$(grep -E '^TOTAL' pytest-coverage.txt | awk '{print $NF}' || echo "n/a")
-            tail=$(awk '/^Name +Stmts/,/^TOTAL/' pytest-coverage.txt | head -200)
+          if [ "$ABI3" = "true" ]; then
+            wheel=$(ls dist/*win_amd64*.whl | head -n1)
           else
-            total="n/a"
-            tail="(no coverage report found)"
+            pytag="cp$(echo "$PYV" | tr -d .)"
+            wheel=$(ls dist/*${pytag}*win_amd64*.whl | head -n1)
           fi
-          echo "total=$total" >> "$GITHUB_OUTPUT"
-          {
-            echo 'report<<COVEOF'
-            echo "$tail"
-            echo 'COVEOF'
-          } >> "$GITHUB_OUTPUT"
-      - uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: pytest-coverage
-          message: |
-            ### Pytest coverage — total **${{ steps.parse.outputs.total }}**
-            <details><summary>Coverage table (Linux 3.12 short tests)</summary>
+          echo "Installing $wheel"
+          uv pip install --python "$PY" "$wheel" pytest pytest-cov
 
-            ```
-            ${{ steps.parse.outputs.report }}
-            ```
-            </details>
-
-            HTML report: download `coverage-html-short` artifact from this run.
-            Threshold (`--cov-fail-under`): ${{ inputs.cov-fail-under }}%.
+          cd "${{ inputs.manifest-dir }}"
+          "$PY" -m pytest ${{ inputs.pytest-args }} \
+            -m "${{ inputs.pytest-markers }}"

@@ -1,0 +1,51 @@
+name: 'Build cross-platform wheels'
+description: |
+  Build maturin wheels for Linux x86_64/aarch64, Windows x86_64/aarch64,
+  and macOS universal2 by invoking the wheel-builder:latest Docker image
+  that lives on the mac-mini-m4-pro self-hosted runner. The image bundles
+  maturin + zig (Linux/macOS cross-compile) and xwin (Windows MSVC
+  cross-compile). Output: dist/*.whl under the caller's working dir.
+
+  Two modes:
+    abi3=true  → one wheel per OS that works for all Python versions
+                 listed by the consumer's pyo3 abi3 feature.
+    abi3=false → per-CPython wheels: one wheel per (OS × Python version
+                 in `python-versions`). Use when the Rust crate uses
+                 APIs that don't fit abi3 (e.g. numpy C API).
+
+inputs:
+  abi3:
+    description: 'true → 5 wheels per repo (one per OS); false → 5*N wheels.'
+    required: false
+    default: 'true'
+  python-versions:
+    description: 'JSON array of Python versions. Only used when abi3=false.'
+    required: false
+    default: '["3.10","3.11","3.12","3.13"]'
+  manifest-dir:
+    description: 'Directory inside the checkout containing the maturin pyproject.toml.'
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Build wheels via wheel-builder Docker image
+      shell: bash
+      env:
+        ABI3: ${{ inputs.abi3 }}
+        PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        MANIFEST_DIR: ${{ inputs.manifest-dir }}
+      run: |
+        mkdir -p dist
+        docker run --rm \
+          -v "$(pwd):/io" \
+          -v "$(xcrun --sdk macosx --show-sdk-path):/sdk:ro" \
+          -v "${{ github.action_path }}:/action:ro" \
+          -e SDKROOT=/sdk \
+          -e MACOSX_DEPLOYMENT_TARGET=11.0 \
+          -e ABI3="$ABI3" \
+          -e PYTHON_VERSIONS="$PYTHON_VERSIONS" \
+          -e MANIFEST_DIR="$MANIFEST_DIR" \
+          wheel-builder:latest \
+          bash /action/build-all.sh
