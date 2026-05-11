@@ -122,7 +122,7 @@ jobs:
           v=$(uv run --with tomli python -c "import tomli; print(tomli.load(open('pyproject.toml','rb'))['project']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - run: uv build --wheel
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ inputs.package-name }}-${{ steps.version.outputs.version }}
           path: dist/*.whl
@@ -198,14 +198,14 @@ jobs:
             | tee pytest-coverage.txt
       - name: Upload htmlcov (Linux 3.12 only)
         if: matrix.os == 'linux' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-html-short
           path: htmlcov
           retention-days: 14
       - name: Upload coverage artifact for sticky comment
         if: matrix.os == 'linux' && matrix.py == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml-short
           path: |
