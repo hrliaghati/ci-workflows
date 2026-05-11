@@ -162,9 +162,11 @@ jobs:
             label: '["self-hosted","Linux","X64","docker"]'
           - os: windows
             label: '["self-hosted","Windows","X64"]'
-            # AURORA's PATH puts WSL's broken bash.exe first and has no
-            # plain `sh`. Each `shell:` below picks Git Bash explicitly
-            # when on Windows via a conditional expression.
+    # NOTE: Windows steps use `shell: bash`. For that to work on the
+    # AURORA self-hosted runner, Git for Windows' bash must appear on
+    # PATH ahead of `C:\Windows\System32\bash.EXE` (WSL's bash, which
+    # has no distro installed). Runner-side configuration is needed —
+    # GitHub Actions falls back to system PATH for `shell: bash`.
     runs-on: ${{ fromJSON(matrix.label) }}
     continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
@@ -180,12 +182,12 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
-        shell: ${{ matrix.os == 'windows' && '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}' || 'sh' }}
+        shell: bash
         run: |
           uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
           uv pip install --python ${{ matrix.py }} pytest pytest-cov
       - name: Run short tests
-        shell: ${{ matrix.os == 'windows' && '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}' || 'sh' }}
+        shell: bash
         run: |
           uv run --python ${{ matrix.py }} pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
@@ -267,12 +269,12 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
-        shell: ${{ matrix.os == 'windows' && '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}' || 'sh' }}
+        shell: bash
         run: |
           uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
           uv pip install --python ${{ matrix.py }} pytest pytest-cov
       - name: Run slow tests
-        shell: ${{ matrix.os == 'windows' && '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}' || 'sh' }}
+        shell: bash
         # No --cov-fail-under here: slow tests alone don't represent total
         # coverage, and the threshold is enforced on the short-test job.
         # Exit code 5 ("no tests collected") is treated as success so repos
