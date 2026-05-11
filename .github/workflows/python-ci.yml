@@ -75,7 +75,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
@@ -110,7 +110,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
@@ -175,7 +175,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
@@ -222,7 +222,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
@@ -262,7 +262,7 @@ jobs:
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           version: ${{ inputs.uv-version }}
