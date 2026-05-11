@@ -45,10 +45,11 @@ runs:
         echo "::add-mask::$T"
     - name: Configure git url rewrites (Windows)
       # The self-hosted Windows runner has WSL's bash.exe on PATH but
-      # no WSL distro installed, so `shell: bash` fails immediately.
-      # Use PowerShell, which the runner always has.
+      # no WSL distro installed (`shell: bash` fails). It also doesn't
+      # have PowerShell Core (`shell: pwsh` fails). Windows PowerShell
+      # 5.x is always present, so use that.
       if: steps.token.outputs.token != '' && runner.os == 'Windows'
-      shell: pwsh
+      shell: powershell
       run: |
         $T = '${{ steps.token.outputs.token }}'
         git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "https://github.com/"
