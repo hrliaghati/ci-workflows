@@ -333,7 +333,7 @@ jobs:
           name: wheels-${{ inputs.package-name }}
           path: dist/
       - name: Run pytest against the Windows AMD64 wheel
-        shell: bash
+        shell: sh
         env:
           ABI3: ${{ inputs.abi3 }}
           PYV: ${{ matrix.python-version }}

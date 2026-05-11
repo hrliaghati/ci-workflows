@@ -177,12 +177,12 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
-        shell: bash
+        shell: sh
         run: |
           uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
           uv pip install --python ${{ matrix.py }} pytest pytest-cov
       - name: Run short tests
-        shell: bash
+        shell: sh
         run: |
           uv run --python ${{ matrix.py }} pytest -m "not slow" \
             --cov=${{ inputs.package-path }} \
@@ -262,12 +262,12 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml\n**/uv.lock"
       - run: uv python install ${{ matrix.py }}
       - name: uv sync
-        shell: bash
+        shell: sh
         run: |
           uv sync --all-extras --python ${{ matrix.py }} || uv sync --python ${{ matrix.py }}
           uv pip install --python ${{ matrix.py }} pytest pytest-cov
       - name: Run slow tests
-        shell: bash
+        shell: sh
         # No --cov-fail-under here: slow tests alone don't represent total
         # coverage, and the threshold is enforced on the short-test job.
         # Exit code 5 ("no tests collected") is treated as success so repos
