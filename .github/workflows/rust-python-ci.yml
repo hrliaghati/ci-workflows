@@ -118,7 +118,7 @@ jobs:
       PYO3_PYTHON: python3.11
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -166,7 +166,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -186,7 +186,7 @@ jobs:
 
   # -------- Version-bump gate -----------------------------------------
   version-check:
-    uses: equiped-code/ci-workflows/.github/workflows/version-check.yml@ci/self-hosted-cross-platform
+    uses: equiped-code/ci-workflows/.github/workflows/version-check.yml@main
     with:
       version-files: ${{ inputs.version-files }}
       skip-paths-regex: ${{ inputs.version-skip-paths-regex }}
@@ -197,11 +197,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-      - uses: equiped-code/ci-workflows/actions/build-wheels@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/build-wheels@main
         with:
           abi3: ${{ inputs.abi3 }}
           python-versions: ${{ inputs.python-versions }}
@@ -227,7 +227,7 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -279,7 +279,7 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -321,7 +321,7 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: equiped-code/ci-workflows/actions/private-fetch@ci/self-hosted-cross-platform
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
