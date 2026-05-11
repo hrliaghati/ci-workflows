@@ -60,16 +60,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The equiped-release-bot GitHub App id is not a secret — anyone with
+  # access to a workflow file can see it. Only the private key is.
+  EQUIPED_BOT_APP_ID: '3680486'
+
 jobs:
   # -------- Lint -------------------------------------------------------
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -89,22 +94,22 @@ jobs:
 
   # -------- Version-bump gate ------------------------------------------
   version-check:
-    uses: hrliaghati/ci-workflows/.github/workflows/version-check.yml@main
+    uses: equiped-code/ci-workflows/.github/workflows/version-check.yml@main
     with:
       version-files: ${{ inputs.version-files }}
       skip-paths-regex: ${{ inputs.version-skip-paths-regex }}
 
   # -------- Build wheel ------------------------------------------------
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -128,7 +133,7 @@ jobs:
   wheel-comment:
     needs: build
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     permissions:
       pull-requests: write
     steps:
@@ -150,16 +155,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [linux, windows]
         py: ${{ fromJSON(inputs.python-versions) }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+        include:
+          - os: linux
+            label: '["self-hosted","Linux","X64","docker"]'
+          - os: windows
+            label: '["self-hosted","Windows","X64"]'
+    # NOTE: Windows steps use `shell: bash`. For that to work on the
+    # AURORA self-hosted runner, Git for Windows' bash must appear on
+    # PATH ahead of `C:\Windows\System32\bash.EXE` (WSL's bash, which
+    # has no distro installed). Runner-side configuration is needed —
+    # GitHub Actions falls back to system PATH for `shell: bash`.
+    runs-on: ${{ fromJSON(matrix.label) }}
+    continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -182,14 +197,14 @@ jobs:
             --cov-fail-under=${{ inputs.cov-fail-under }} \
             | tee pytest-coverage.txt
       - name: Upload htmlcov (Linux 3.12 only)
-        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        if: matrix.os == 'linux' && matrix.py == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-html-short
           path: htmlcov
           retention-days: 14
       - name: Upload coverage artifact for sticky comment
-        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.12'
+        if: matrix.os == 'linux' && matrix.py == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml-short
@@ -200,13 +215,13 @@ jobs:
 
   # -------- Short tests: macOS (canary version only) ------------------
   test-short-macos:
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -230,16 +245,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [linux, windows]
         py: ${{ fromJSON(inputs.slow-test-versions) }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' && inputs.windows-allow-fail }}
+        include:
+          - os: linux
+            label: '["self-hosted","Linux","X64","docker"]'
+            shell: 'sh'
+          - os: windows
+            label: '["self-hosted","Windows","X64"]'
+            shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}'
+    runs-on: ${{ fromJSON(matrix.label) }}
+    continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
       - uses: actions/checkout@v4
-      - uses: hrliaghati/ci-workflows/actions/private-fetch@main
+      - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          app-id: ${{ env.EQUIPED_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -278,7 +300,7 @@ jobs:
   coverage-comment:
     needs: test-short-linux-windows
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     permissions:
       pull-requests: write
     steps:

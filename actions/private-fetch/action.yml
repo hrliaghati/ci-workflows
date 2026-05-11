@@ -1,20 +1,24 @@
 name: 'Configure private cross-repo fetch'
 description: |
-  Mint a short-lived GitHub App token via CI_APP_ID + CI_APP_PRIVATE_KEY
-  (expected to be set as secrets on each consuming repo) and configure
-  git to use it for HTTPS fetches on github.com (and to rewrite ssh://
-  URLs to HTTPS). This lets cargo and pip resolve private cohort
+  Mint a short-lived GitHub App token from the caller-provided app id +
+  private key, then rewrite git config so HTTPS and SSH github.com URLs
+  fetch via that token. Lets cargo and pip resolve private cohort
   cross-repo dependencies (orbprop, routelib, etc.) inside CI runs.
 
-  No-op (silent) when the secrets aren't set — repos that don't have
-  cross-repo deps don't need configuration.
+  The org standard is the equiped-release-bot App (id 3680486, public)
+  with the private key deployed as RELEASE_BOT_PRIVATE_KEY on each
+  consumer. Callers typically pass app-id 3680486 and private-key from
+  secrets.RELEASE_BOT_PRIVATE_KEY.
+
+  No-op (silent) when inputs are empty — repos that don't have
+  cross-repo deps can include the step unconditionally.
 
 inputs:
   app-id:
-    description: 'CI_APP_ID secret (pass via secrets.CI_APP_ID)'
+    description: 'GitHub App id (the equiped-release-bot id, 3680486, is not a secret).'
     required: false
   private-key:
-    description: 'CI_APP_PRIVATE_KEY secret (pass via secrets.CI_APP_PRIVATE_KEY)'
+    description: 'GitHub App private key (pass via secrets.RELEASE_BOT_PRIVATE_KEY).'
     required: false
   owner:
     description: 'GitHub owner (defaults to current repository owner)'
@@ -31,11 +35,23 @@ runs:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ inputs.owner }}
-    - name: Configure git url rewrites
-      if: steps.token.outputs.token != ''
+    - name: Configure git url rewrites (non-Windows)
+      if: steps.token.outputs.token != '' && runner.os != 'Windows'
       shell: bash
       run: |
         T='${{ steps.token.outputs.token }}'
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "https://github.com/"
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "ssh://git@github.com/"
         echo "::add-mask::$T"
+    - name: Configure git url rewrites (Windows)
+      # The self-hosted Windows runner has WSL's bash.exe on PATH but
+      # no WSL distro installed (`shell: bash` fails). It also doesn't
+      # have PowerShell Core (`shell: pwsh` fails). Windows PowerShell
+      # 5.x is always present, so use that.
+      if: steps.token.outputs.token != '' && runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $T = '${{ steps.token.outputs.token }}'
+        git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "https://github.com/"
+        git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "ssh://git@github.com/"
+        Write-Host "::add-mask::$T"
