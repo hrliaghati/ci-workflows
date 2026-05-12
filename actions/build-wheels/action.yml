@@ -38,10 +38,18 @@ runs:
         MANIFEST_DIR: ${{ inputs.manifest-dir }}
       run: |
         mkdir -p dist
+        # Stage the runner's git config so cargo/git inside the container
+        # picks up the bot-token URL rewrites that the private-fetch step
+        # wrote on the host. Without this, cross-repo cargo deps (e.g.
+        # vista-core → orbprop, stateprop-core → refframe) fail with
+        # `cargo metadata` errors inside the container.
+        GITCONFIG=$(mktemp)
+        cp "${HOME}/.gitconfig" "$GITCONFIG" 2>/dev/null || : > "$GITCONFIG"
         docker run --rm \
           -v "$(pwd):/io" \
           -v "$(xcrun --sdk macosx --show-sdk-path):/sdk:ro" \
           -v "${{ github.action_path }}:/action:ro" \
+          -v "$GITCONFIG:/root/.gitconfig:ro" \
           -e SDKROOT=/sdk \
           -e MACOSX_DEPLOYMENT_TARGET=11.0 \
           -e ABI3="$ABI3" \
@@ -49,3 +57,4 @@ runs:
           -e MANIFEST_DIR="$MANIFEST_DIR" \
           wheel-builder:latest \
           bash /action/build-all.sh
+        rm -f "$GITCONFIG"
