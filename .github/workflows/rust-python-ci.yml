@@ -116,6 +116,12 @@ jobs:
       # a runner-resident interpreter (uv-managed Python 3.11 at
       # ~/.local/bin/python3.11).
       PYO3_PYTHON: python3.11
+      # Cargo's bundled libgit2 doesn't always honor the
+      # `url.<x>.insteadOf` rewrites that private-fetch installs in
+      # gitconfig. Force cargo to shell out to the system `git`, which
+      # respects the rewrites — needed for cross-repo cargo deps
+      # (e.g. stateprop-core → refframe-core) to fetch via the bot token.
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
