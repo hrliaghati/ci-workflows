@@ -147,7 +147,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: marocchino/sticky-pull-request-comment@v2
+      - uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: wheel-artifact
           message: |
@@ -348,7 +348,7 @@ jobs:
             echo "$tail"
             echo 'COVEOF'
           } >> "$GITHUB_OUTPUT"
-      - uses: marocchino/sticky-pull-request-comment@v2
+      - uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pytest-coverage
           message: |
