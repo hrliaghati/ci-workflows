@@ -118,6 +118,11 @@ jobs:
       PYO3_PYTHON: python3.11
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -129,8 +134,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ inputs.manifest-dir }}
-      - name: cargo build
-        run: cargo build --workspace --all-targets
+      # Drop `cargo build --workspace --all-targets` — `cargo test`
+      # below builds the test targets and `cargo clippy --all-targets`
+      # below builds the rest, so the explicit build is redundant. It
+      # also fails on non-abi3 -py crates whose cdylib expects to be
+      # linked into a Python host (unresolved CPython symbols at link
+      # time).
       - name: cargo test
         run: cargo test ${{ inputs.cargo-test-args }}
       - name: cargo fmt --check
@@ -166,6 +175,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -197,6 +211,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -227,6 +246,11 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -279,6 +303,11 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -321,6 +350,11 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}

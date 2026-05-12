@@ -71,6 +71,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -106,6 +111,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -171,6 +181,11 @@ jobs:
     continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -218,6 +233,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
@@ -258,6 +278,11 @@ jobs:
     continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See ci-workflows note: keep checkout from persisting a
+          # GITHUB_TOKEN extraheader that would override private-fetch
+          # URL rewrites for cross-repo cargo/pip fetches.
+          persist-credentials: false
       - uses: equiped-code/ci-workflows/actions/private-fetch@main
         with:
           app-id: ${{ env.EQUIPED_BOT_APP_ID }}
