@@ -123,7 +123,7 @@ jobs:
       # (e.g. stateprop-core → refframe-core) to fetch via the bot token.
       CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -180,7 +180,7 @@ jobs:
     name: lint-py
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -216,7 +216,7 @@ jobs:
     name: build-wheels
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -251,7 +251,7 @@ jobs:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -308,7 +308,7 @@ jobs:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -355,7 +355,7 @@ jobs:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch

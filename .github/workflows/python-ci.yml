@@ -70,7 +70,7 @@ jobs:
   lint:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -110,7 +110,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -180,7 +180,7 @@ jobs:
     runs-on: ${{ fromJSON(matrix.label) }}
     continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -232,7 +232,7 @@ jobs:
   test-short-macos:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
@@ -277,7 +277,7 @@ jobs:
     runs-on: ${{ fromJSON(matrix.label) }}
     continue-on-error: ${{ matrix.os == 'windows' && inputs.windows-allow-fail }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # See ci-workflows note: keep checkout from persisting a
           # GITHUB_TOKEN extraheader that would override private-fetch
