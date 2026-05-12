@@ -28,6 +28,24 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    # Always-run cleanup: a previous workflow on this same self-hosted
+    # runner may have set `http.https://github.com/.extraheader` in the
+    # user's global gitconfig (an earlier iteration of this action
+    # tried that approach). That value now persists across runs and
+    # collides with actions/checkout's per-command Authorization,
+    # producing "Duplicate header: Authorization" 400s. Unset it
+    # unconditionally before doing anything else.
+    - name: Clear stale global git auth state (non-Windows)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        git config --global --unset-all http.https://github.com/.extraheader || true
+    - name: Clear stale global git auth state (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        git config --global --unset-all "http.https://github.com/.extraheader"
+        if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
     - uses: actions/create-github-app-token@v1
       id: token
       continue-on-error: true
@@ -41,18 +59,19 @@ runs:
       run: |
         T='${{ steps.token.outputs.token }}'
         echo "::add-mask::$T"
-        # 1. URL rewrite — handles tools that bypass HTTP headers (some
-        #    libgit2 paths).
+        # 1. URL rewrite — handles libgit2 callers that read git config.
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "https://github.com/"
         git config --global url."https://x-access-token:${T}@github.com/".insteadOf "ssh://git@github.com/"
-        # 2. HTTP extraheader — same mechanism actions/checkout uses,
-        #    works with `git fetch` invoked by cargo (CARGO_NET_GIT_FETCH_WITH_CLI=true).
-        #    Some git invocations don't apply `insteadOf` to URLs that
-        #    already specify a different host (or to cargo's libgit2
-        #    fallback), but the extraheader is sent regardless.
-        AUTH=$(printf 'x-access-token:%s' "$T" | base64 | tr -d '\n')
-        echo "::add-mask::$AUTH"
-        git config --global http."https://github.com/".extraheader "AUTHORIZATION: basic $AUTH"
+        # 2. Credential store — for any git invocation that ASKS for
+        #    credentials (e.g. cargo's `git fetch` via CARGO_NET_GIT_FETCH_WITH_CLI=true
+        #    when libgit2's url-rewrite handling doesn't kick in).
+        #    Credential helper is only consulted when git lacks creds
+        #    inline, so it doesn't conflict with actions/checkout's own
+        #    per-command Authorization header (which caused "Duplicate
+        #    header: Authorization" 400s when we tried http.extraheader).
+        printf 'https://x-access-token:%s@github.com\n' "$T" > "$HOME/.git-credentials"
+        chmod 600 "$HOME/.git-credentials"
+        git config --global credential.helper store
     - name: Configure git auth (Windows)
       # The self-hosted Windows runner has WSL's bash.exe on PATH but
       # no WSL distro installed (`shell: bash` fails). It also doesn't
@@ -65,6 +84,6 @@ runs:
         Write-Host "::add-mask::$T"
         git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "https://github.com/"
         git config --global "url.https://x-access-token:$T@github.com/.insteadOf" "ssh://git@github.com/"
-        $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$T"))
-        Write-Host "::add-mask::$auth"
-        git config --global "http.https://github.com/.extraheader" "AUTHORIZATION: basic $auth"
+        $credFile = Join-Path $env:USERPROFILE ".git-credentials"
+        "https://x-access-token:$T@github.com" | Set-Content -Encoding Ascii $credFile
+        git config --global credential.helper store
