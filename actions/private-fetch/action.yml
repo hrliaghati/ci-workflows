@@ -28,24 +28,45 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    # Always-run cleanup: a previous workflow on this same self-hosted
-    # runner may have set `http.https://github.com/.extraheader` in the
-    # user's global gitconfig (an earlier iteration of this action
-    # tried that approach). That value now persists across runs and
-    # collides with actions/checkout's per-command Authorization,
-    # producing "Duplicate header: Authorization" 400s. Unset it
-    # unconditionally before doing anything else.
+    # Always-run cleanup: persistent self-hosted runners accumulate
+    # stale gitconfig state from previous workflow runs:
+    #   - http.https://github.com/.extraheader (an earlier iteration of
+    #     this action tried that approach; it collides with
+    #     actions/checkout's per-command Authorization → "Duplicate
+    #     header: Authorization" 400)
+    #   - url.https://x-access-token:<expired>@github.com/.insteadof
+    #     entries accumulating one-per-run from `git config --global`
+    #     appending rather than replacing
+    # Clear all of these before minting fresh auth.
     - name: Clear stale global git auth state (non-Windows)
       if: runner.os != 'Windows'
       shell: bash
       run: |
-        git config --global --unset-all http.https://github.com/.extraheader || true
+        git config --global --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+        # Drop every `url."https://x-access-token:*@github.com/".insteadof`
+        # entry (expired App-installation tokens from previous runs).
+        while git config --global --get-regexp '^url\.https://x-access-token:.+@github\.com/\.insteadof' 2>/dev/null | grep -q .; do
+          key=$(git config --global --get-regexp '^url\.https://x-access-token:.+@github\.com/\.insteadof' 2>/dev/null | head -1 | awk '{print $1}')
+          git config --global --unset-all "$key" 2>/dev/null || break
+        done
+        rm -f "$HOME/.git-credentials"
     - name: Clear stale global git auth state (Windows)
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        git config --global --unset-all "http.https://github.com/.extraheader"
+        git config --global --unset-all "http.https://github.com/.extraheader" 2>$null
         if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
+        # Drop stale url.<token>@github.com/.insteadof entries.
+        while ($true) {
+          $line = (git config --global --get-regexp '^url\.https://x-access-token:.+@github\.com/\.insteadof' 2>$null | Select-Object -First 1)
+          if (-not $line) { break }
+          $key = ($line -split '\s+')[0]
+          git config --global --unset-all $key 2>$null
+          if ($LASTEXITCODE -ne 0) { break }
+        }
+        $global:LASTEXITCODE = 0
+        $credFile = Join-Path $env:USERPROFILE ".git-credentials"
+        if (Test-Path $credFile) { Remove-Item $credFile -Force }
     - uses: actions/create-github-app-token@v1
       id: token
       continue-on-error: true
